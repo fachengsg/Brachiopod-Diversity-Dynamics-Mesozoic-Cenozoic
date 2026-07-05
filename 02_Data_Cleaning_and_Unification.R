@@ -1,8 +1,7 @@
 # ==============================================================================
 # Script Name: 02_Data_Cleaning_and_Unification.R
-# Purpose: Clean taxonomy (remove open nomenclature), resolve synonyms via 
-#          fuzzy matching, unify PBDB & GBDB datasets, assign strict 
-#          stratigraphic stages, and perform cross-database deduplication.
+# Purpose: Clean taxonomy, resolve synonyms, unify PBDB & GBDB, 
+#          assign stratigraphic stages, deduplicate, and filter environments.
 # ==============================================================================
 
 rm(list = ls())
@@ -12,12 +11,12 @@ library(dplyr)
 library(stringr)
 library(stringdist)
 library(readr)
-library(divDyn) # Added for strict stage assignment
+library(divDyn)
 
 # Set working directory
 setwd("D:/PBDB_Project")
 
-# Load raw merged data (imported as character from previous step)
+# Load raw merged data
 pbdb <- readRDS("PBDB_All_Mesozoic_Cenozoic.rds")
 gbdb <- readRDS("GBDB_Mesozoic_Cenozoic_clean.rds")
 
@@ -146,6 +145,8 @@ if (nrow(similar_accepted) > 0) {
   }
 }
 
+# ---- 5.5 Detect Similar Families ----
+# This logic calculates family similarities to be exported in Section 9
 unique_families <- unique(na.omit(pbdb_brach$family))
 fam_similar <- if(length(unique_families) >= 2) detect_similar(unique_families, 0.1) else data.frame()
 
@@ -161,26 +162,25 @@ gbdb_unified <- gbdb_brach %>%
     occurrence_no = occurrence_id,
     collection_no = collection_id,
     accepted_name = identified_name,
-    environment = paleoenvironment,
-    motility = mobility,      
-    diet = feeding_mode       
+    environment = paleoenvironment,         
+    motility = mobility,            
+    diet = feeding_mode,            
+    life_habit = tiering            
   ) %>%
   mutate(
     accepted_genus = genus, 
     source = "GBDB",
-    life_habit = NA_character_,
     cc = NA_character_
   ) %>%
   select(occurrence_no, collection_no, accepted_name, accepted_genus, genus, family, order, class, phylum,
          early_interval, max_ma, min_ma, period, lng, lat, paleolng, paleolat,
          environment, motility, life_habit, diet, cc, source, 
-         country, province, formation, coll_lower_depth, coll_upper_depth, tiering)
+         country, province, formation, coll_lower_depth, coll_upper_depth)
 
 analysis_data <- bind_rows(pbdb_unified, gbdb_unified) %>%
   mutate(across(c(max_ma, min_ma, lng, lat, paleolng, paleolat, coll_lower_depth, coll_upper_depth), as.numeric))
 
 # ---- 7. Strict Stage Assignment (Using divDyn) ----
-# Calculate midpoint age to assign robust international stages
 analysis_data$mid_age <- (analysis_data$max_ma + analysis_data$min_ma) / 2
 
 data(stages)
@@ -201,15 +201,12 @@ analysis_data$stage <- assign_stage_vec(analysis_data$mid_age, stages_ph)
 analysis_data <- filter(analysis_data, !is.na(stage))
 
 # ---- 8. Cross-Database Duplicate Diagnostic & Removal ----
-# Detects overlapping records between PBDB and GBDB based on genus, stage, and spatial coordinates.
 cat("\n--- Cross-database duplicate diagnostic ---\n")
 
 diag_data <- analysis_data %>%
   mutate(
-    coord_lat = if_else(!is.na(paleolat) & !is.na(paleolng), round(paleolat, 1),
-                        if_else(!is.na(lat) & !is.na(lng), round(lat, 1), NA_real_)),
-    coord_lng = if_else(!is.na(paleolat) & !is.na(paleolng), round(paleolng, 1),
-                        if_else(!is.na(lat) & !is.na(lng), round(lng, 1), NA_real_))
+    coord_lat = if_else(!is.na(lat) & !is.na(lng), round(lat, 1), NA_real_),
+    coord_lng = if_else(!is.na(lat) & !is.na(lng), round(lng, 1), NA_real_)
   )
 
 match_summary <- diag_data %>%
@@ -224,21 +221,43 @@ mixed_groups <- match_summary %>% filter(n_records > 1, grepl("PBDB", sources) &
 cat("Match groups (genus + stage + 0.1° coord.) containing both PBDB and GBDB records:", nrow(mixed_groups), "\n")
 
 if (nrow(mixed_groups) > 0) {
-  # Identify GBDB duplicates that overlap with PBDB
   gbdb_to_remove <- diag_data %>%
     inner_join(mixed_groups %>% select(accepted_genus, stage, coord_lat, coord_lng),
                by = c("accepted_genus", "stage", "coord_lat", "coord_lng")) %>%
     filter(source == "GBDB")
   
-  # Remove the overlapping GBDB records (giving priority to PBDB)
   analysis_data <- analysis_data %>% anti_join(gbdb_to_remove, by = c("occurrence_no", "source"))
   cat("Removed", nrow(gbdb_to_remove), "GBDB duplicate records (PBDB given priority).\n")
-} else {
-  cat("No cross-database duplicates detected. All records retained.\n")
 }
 
-# Final safety check: remove exact duplicate rows
 analysis_data <- distinct(analysis_data)
+
+# ---- 8.5 Strict Environment Filtering ----
+# Remove records from non-marine or highly suspicious transitional settings
+cat("\n--- Applying strict marine environment filter ---\n")
+non_marine_terms <- "terrestrial|fluvial|lacustrine|floodplain|channel|transitional|paralic|volcanic|delta|estuary"
+
+analysis_data <- analysis_data %>%
+  filter(!str_detect(str_to_lower(environment), non_marine_terms))
+
+cat("Non-marine and transitional records removed. Proceeding with analysis.\n")
+
+# ---- 8.6 Environment Data Audit ----
+cat("\n--- Running Environment Data Audit (Post-filter) ---\n")
+
+env_audit <- analysis_data %>%
+  select(source, environment) %>%
+  filter(!is.na(environment)) %>%
+  mutate(environment = str_to_lower(environment))
+
+env_summary <- env_audit %>%
+  separate_rows(environment, sep = ",\\s*|;\\s*") %>%
+  group_by(source, environment) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  arrange(source, desc(count))
+
+write_csv(env_summary, "Audit_Environment_Terminology.csv")
+cat("Audit complete. Please check 'Audit_Environment_Terminology.csv' for data quality.\n")
 
 # ---- 9. Export Outputs ----
 saveRDS(analysis_data, "Brachiopoda_analysis_data.rds")
@@ -257,4 +276,4 @@ analysis_data %>%
     unique_species = n_distinct(accepted_name, na.rm = TRUE)
   ) %>%
   print()
-
+  
