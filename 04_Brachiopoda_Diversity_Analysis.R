@@ -393,3 +393,119 @@ export_results <- list(
 saveRDS(export_results, "Results_Brachiopoda.rds")
 cat("\nBrachiopoda pipeline complete! Plots and statistical RDS exported.\n")
 
+
+# ==============================================================================
+# PART E: TAXONOMIC HIERARCHY DATA EXPORT (SPECIES, GENUS, FAMILY)
+# Purpose: Extract, chronologically sort, and export Raw & Standardised 
+#          richness data across multiple taxonomic ranks for the unfiltered baseline.
+# ==============================================================================
+cat("\n--- Running Taxonomic Hierarchy Data Extraction ---\n")
+
+if (exists("unfiltered_data")) {
+  
+  # 1. Universal Abundance Matrix Generator
+  make_taxa_matrix <- function(data, time_col, tax_col) {
+    data %>%
+      filter(!is.na(.data[[tax_col]]) & !is.na(.data[[time_col]])) %>%
+      group_by(.data[[time_col]], .data[[tax_col]]) %>%
+      summarise(count = n(), .groups = "drop") %>%
+      pivot_wider(names_from = all_of(time_col), values_from = count, values_fill = 0) %>%
+      column_to_rownames(tax_col) %>%
+      as.matrix()
+  }
+  
+  # 2. Universal Diversity Calculator (Extracts Raw & Std, excludes SC < 0.6)
+  calc_taxa_div <- function(data, time_col, tax_col, tax_name) {
+    cat(paste("Calculating", tax_name, "richness for", time_col, "...\n"))
+    
+    # Calculate Raw Richness
+    raw_counts <- data %>%
+      filter(!is.na(.data[[tax_col]]) & !is.na(.data[[time_col]])) %>%
+      group_by(.data[[time_col]]) %>%
+      summarise(raw = n_distinct(.data[[tax_col]]), .groups = "drop") %>%
+      rename(Time = .data[[time_col]])
+    
+    # Generate Matrix & Extract Sample Coverage (SC)
+    mat <- make_taxa_matrix(data, time_col, tax_col)
+    datainfo <- DataInfo(mat, datatype = "abundance")
+    
+    # Calculate Standardised Richness (C = 0.95)
+    suppressMessages(
+      est <- estimateD(mat, q = 0, datatype = "abundance", base = "coverage", level = 0.95)
+    )
+    
+    std_counts <- est %>%
+      select(Assemblage, std = qD) %>%
+      rename(Time = Assemblage)
+    
+    # Merge results and apply the Sample Coverage (SC) < 0.6 exclusion threshold
+    res <- raw_counts %>%
+      left_join(std_counts, by = "Time") %>%
+      left_join(datainfo %>% select(Time = Assemblage, SC), by = "Time") %>%
+      mutate(
+        raw = ifelse(SC < 0.6, NA, raw),
+        std = ifelse(SC < 0.6, NA, std)
+      ) %>%
+      select(Time, raw, std)
+    
+    # Rename columns to reflect the specific taxonomic level
+    colnames(res)[2:3] <- paste0(tax_name, "_", c("Raw", "Std"))
+    return(res)
+  }
+  
+  # 3. Extract Stage-level Data
+  stage_species <- calc_taxa_div(unfiltered_data, "early_interval", "accepted_name", "Species")
+  stage_genus   <- calc_taxa_div(unfiltered_data, "early_interval", "genus", "Genus")
+  stage_family  <- calc_taxa_div(unfiltered_data, "early_interval", "family", "Family")
+  
+  stage_summary <- stage_species %>%
+    full_join(stage_genus, by = "Time") %>%
+    full_join(stage_family, by = "Time")
+  
+  # 4. Extract 10-Myr Bin-level Data
+  bin_species <- calc_taxa_div(unfiltered_data, "bin", "accepted_name", "Species")
+  bin_genus   <- calc_taxa_div(unfiltered_data, "bin", "genus", "Genus")
+  bin_family  <- calc_taxa_div(unfiltered_data, "bin", "family", "Family")
+  
+  bin_summary <- bin_species %>%
+    full_join(bin_genus, by = "Time") %>%
+    full_join(bin_family, by = "Time")
+  
+  # 5. Format, Chronological Sorting, and CSV Export
+  
+  # (A) Format Stage-level data: Retain standard stages only and sort chronologically
+  stage_summary_sorted <- stage_summary %>%
+    # Retain only standard international geological stages (filters out ambiguous "Early/Late" prefixes)
+    filter(Time %in% stage_info$stage) %>%
+    # Append midpoint age for chronological sorting
+    left_join(stage_info %>% select(stage, mid_age), by = c("Time" = "stage")) %>%
+    # Sort descending by midpoint age (oldest to youngest)
+    arrange(desc(mid_age)) %>%
+    # Reorder columns for optimal readability
+    relocate(mid_age, .after = Time)
+  
+  # (B) Format Bin-level data: Extract bin start age and sort chronologically
+  bin_summary_sorted <- bin_summary %>%
+    # Extract the numeric start age from bin labels (e.g., "250" from "250-260")
+    mutate(start_age = as.numeric(sub("-.*", "", Time))) %>%
+    # Sort descending by start age (oldest to youngest)
+    arrange(desc(start_age)) %>%
+    # Remove the temporary sorting column
+    select(-start_age)
+  
+  # (C) Export to CSV in the root directory
+  write_csv(stage_summary_sorted, "Unfiltered_Brachiopoda_Stage_Summary.csv")
+  write_csv(bin_summary_sorted, "Unfiltered_Brachiopoda_Bin_Summary.csv")
+  
+  cat("\n--- Taxonomic hierarchy data successfully sorted and exported to CSV! ---\n")
+  
+  # Optional: View the finalized and sorted tables in RStudio Viewer
+  View(stage_summary_sorted, title = "Sorted Stage Summary")
+  View(bin_summary_sorted, title = "Sorted Bin Summary")
+  
+} else {
+  warning("Object 'unfiltered_data' not found. Ensure PART D was executed successfully.")
+}
+# ==============================================================================
+# END OF SCRIPT 04
+# ==============================================================================
