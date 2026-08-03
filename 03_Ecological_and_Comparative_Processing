@@ -1,19 +1,47 @@
 # ==============================================================================
 # Script Name: 03_Ecological_and_Comparative_Processing.R
-# Purpose: 
+# Purpose:
 #   1. Harmonize ecological vocabulary between PBDB and GBDB.
-#   2. Implement Genus-level Trait Imputation (Taxonomic Inheritance) to rescue 
-#      occurrences with NA ecological traits.
+#   2. Implement genus-level trait imputation (taxonomic inheritance) to rescue
+#      occurrences with missing ecological traits.
 #   3. Process and export clean Brachiopoda data.
 #   4. Extract, harmonize, and filter comparable Bivalvia & Echinodermata data.
 # ==============================================================================
 
+# Clear the workspace. Comment out this line if you want to keep existing objects.
 rm(list = ls())
 
 # ---- 1. Environment Setup & Packages ----
-library(tidyverse)
+required_packages <- c("dplyr", "readr", "stringr", "tidyr")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
 
-setwd("D:/PBDB_Project") 
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidyr)
+
+# --- Working directory: choose one of the two options below ---
+# Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
+# Option B: Leave custom_dir as NULL or "" to automatically use the
+#           folder that contains this script (works in RStudio).
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
+
+if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
+  if (!dir.exists(custom_dir)) {
+    dir.create(custom_dir, recursive = TRUE)
+    cat("Folder created:", custom_dir, "\n")
+  }
+  setwd(custom_dir)
+} else {
+  if (requireNamespace("rstudioapi", quietly = TRUE)) {
+    script_path <- rstudioapi::getActiveDocumentContext()$path
+    if (nchar(script_path) > 0) {
+      setwd(dirname(script_path))
+    }
+  }
+}
+cat("Working directory:", getwd(), "\n")
 
 cat("--- Starting Ecological and Comparative Processing with Trait Imputation ---\n")
 
@@ -26,13 +54,13 @@ harmonize_ecology <- function(df) {
         TRUE ~ diet
       ),
       motility = case_when(
-        motility %in% c("Non-motile/attached", "Non-motile/unattached", 
-                        "stationary", "stationary, attached", 
+        motility %in% c("Non-motile/attached", "Non-motile/unattached",
+                        "stationary", "stationary, attached",
                         "stationary, attached, epibiont") ~ "stationary",
         TRUE ~ motility
       ),
       life_habit = case_when(
-        life_habit %in% c("Surficial", "Erect", "epifaunal", 
+        life_habit %in% c("Surficial", "Erect", "epifaunal",
                           "low-level epifaunal", "epifaunal, gregarious") ~ "epifaunal",
         life_habit %in% c("Shallow_infaunal", "Semi-infaunal") ~ "infaunal",
         TRUE ~ life_habit
@@ -52,18 +80,13 @@ cat("Brachiopoda raw records loaded:", nrow(brach_raw), "\n")
 # 1. Harmonize vocabulary
 brach_harmonized <- harmonize_ecology(brach_raw)
 
-# 2. SAFE PURIFICATION: Instead of a generic whitelist, we explicitly
-#    REMOVE rows that are confirmed to be non-comparable niches (like Infaunal Lingula)
+# 2. Safe purification: remove confirmed non‑comparable niches (e.g. infaunal Lingula),
+#    but keep rows with missing trait information.
 brach_data_final <- brach_harmonized %>%
   filter(
-    # Keep if it is our target diet, OR if the diet info is missing (NA)
     (diet == "suspension feeder" | is.na(diet)),
-    
-    # Keep if it is stationary, OR if motility info is missing (NA)
     (motility == "stationary" | is.na(motility)),
-    
-    # CRITICAL: Explicitly drop entries that are confirmed Infaunal (like Lingula)
-    # If life_habit is NA, we safely keep it because >95% of brachiopods are epifaunal
+    # Drop confirmed infaunal entries; keep NA because >95% of brachiopods are epifaunal
     (life_habit == "epifaunal" | is.na(life_habit))
   )
 
@@ -71,6 +94,22 @@ cat("Brachiopoda records retained after safe eco-purification:", nrow(brach_data
 
 saveRDS(brach_data_final, "Brachiopoda_analysis_data_Final.rds")
 write_csv(brach_data_final, "Brachiopoda_analysis_data_Final.csv")
+
+# ---- Summary statistics for the manuscript ----
+cat("\n--- Final Brachiopoda Dataset: Overall Taxon Counts ---\n")
+
+brach_summary <- brach_data_final %>%
+  summarise(
+    total_occurrences = n(),
+    unique_genera     = n_distinct(genus, na.rm = TRUE),
+    unique_species    = n_distinct(
+      accepted_name[str_detect(accepted_name, " ")], na.rm = TRUE),
+    unique_families   = n_distinct(family, na.rm = TRUE)
+  )
+
+print(brach_summary)
+write_csv(brach_summary, "Brachiopoda_final_taxon_counts.csv")
+cat("Summary saved to 'Brachiopoda_final_taxon_counts.csv'\n")
 
 # ==============================================================================
 # PART B: COMPARATIVE TAXA (BIVALVIA & ECHINODERMATA) PROCESSING
@@ -86,8 +125,8 @@ pbdb_comp <- pbdb_raw %>%
   mutate(source = "PBDB", country = NA_character_) %>%
   select(occurrence_no, collection_no, accepted_name, genus, family, order, class, phylum,
          early_interval, max_ma, min_ma, period, lng, lat, paleolng, paleolat,
-         environment, motility, life_habit, diet, source, 
-         cc = `cc...35`, country) 
+         environment, motility, life_habit, diet, source,
+         cc = `cc...35`, country)   # PBDB column name may contain dots; adjust if needed
 
 # Extract GBDB
 gbdb_comp <- gbdb_raw %>%
@@ -96,19 +135,19 @@ gbdb_comp <- gbdb_raw %>%
     occurrence_no = occurrence_id,
     collection_no = collection_id,
     accepted_name = identified_name,
-    genus = pbdb_genus,             
+    genus = pbdb_genus,             # GBDB original column name for genus
     environment = paleoenvironment,
-    motility = mobility,            
-    diet = feeding_mode,            
-    life_habit = tiering            
+    motility = mobility,
+    diet = feeding_mode,
+    life_habit = tiering
   ) %>%
   mutate(source = "GBDB", cc = NA_character_) %>%
   select(occurrence_no, collection_no, accepted_name, genus, family, order, class, phylum,
          early_interval, max_ma, min_ma, period, lng, lat, paleolng, paleolat,
-         environment, motility, life_habit, diet, source, 
+         environment, motility, life_habit, diet, source,
          cc, country)
 
-# Combine and Harmonize
+# Combine and harmonize
 comp_harmonized <- bind_rows(pbdb_comp, gbdb_comp) %>%
   mutate(across(c(max_ma, min_ma, lng, lat, paleolng, paleolat), as.numeric)) %>%
   harmonize_ecology()
@@ -117,7 +156,7 @@ comp_harmonized <- bind_rows(pbdb_comp, gbdb_comp) %>%
 # Genus-Level Taxonomic Imputation for Comparative Data
 # ------------------------------------------------------------------------------
 
-# 1. Identify Target Genera: Which genera EVER exhibit the exact target ecology?
+# 1. Identify target genera: genera that EVER exhibit the exact target ecology
 target_comp_genera <- comp_harmonized %>%
   filter(
     diet == "suspension feeder",
@@ -128,12 +167,12 @@ target_comp_genera <- comp_harmonized %>%
   pull(genus) %>%
   unique()
 
-# 2. Rescue Occurrences: Extract ALL records of these target genera
+# 2. Rescue occurrences: keep ALL records of these target genera
 comparable_data_rescued <- comp_harmonized %>%
   filter(genus %in% target_comp_genera)
 
 cat("\n--- Final Comparable Dataset Summary (Post-Imputation) ---\n")
-cat("Total comparative Genera captured:", length(target_comp_genera), "\n")
+cat("Total comparative genera captured:", length(target_comp_genera), "\n")
 print(comparable_data_rescued %>% count(phylum, class, source))
 
 saveRDS(comparable_data_rescued, "Comparative_Bivalvia_Echinodermata.rds")
