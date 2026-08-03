@@ -1,39 +1,60 @@
 # ==============================================================================
 # Script Name: 01_Data_Fetching_and_Merging.R
-# Purpose: Fetch Mesozoic-Cenozoic Brachiopoda, Bivalvia, and Echinodermata 
-#          occurrences from PBDB, and integrate local GBDB data.
+# Purpose: Fetch Mesozoic–Cenozoic brachiopod, bivalve, and echinoderm
+#          occurrences from the Paleobiology Database (PBDB) and integrate
+#          local data from the Geobiodiversity Database (GBDB).
+# Data availability:
+#   - PBDB data are fetched directly from the PBDB API.
+#   - GBDB data are archived on Zenodo (https://doi.org/10.5281/zenodo.21765787)
+#     and will be automatically downloaded if not present in the working directory.
 # ==============================================================================
 
+# Clear the workspace. Comment out this line if you want to keep existing objects.
 rm(list = ls())
 
 # ---- 1. Environment Setup ----
-# Install required packages if missing
+# Install missing packages
 required_packages <- c("httr", "readr", "dplyr", "tidyr")
 new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
 if(length(new_packages)) install.packages(new_packages)
 
-# Load packages
 library(httr)
 library(readr)
 library(dplyr)
 library(tidyr)
 
-# Set working directory
-target_dir <- "D:/PBDB_Project"
-if (!dir.exists(target_dir)) {
-  dir.create(target_dir, recursive = TRUE)
-  cat("Folder created:", target_dir, "\n")
-}
-setwd(target_dir)
-cat("Current working directory:", getwd(), "\n")
+# --- Working directory: choose one of the two options below ---
+# Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
+# Option B: Leave custom_dir as NULL or "" to automatically use the
+#           folder that contains this script (works in RStudio).
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
 
-# ---- 2. Define PBDB Fetching Function ----
-# Minimal paginated download – robust to network hiccups
+if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
+  # Use the user-specified directory
+  if (!dir.exists(custom_dir)) {
+    dir.create(custom_dir, recursive = TRUE)
+    cat("Folder created:", custom_dir, "\n")
+  }
+  setwd(custom_dir)
+} else {
+  # Automatically use the script's location (requires RStudio)
+  if (requireNamespace("rstudioapi", quietly = TRUE)) {
+    script_path <- rstudioapi::getActiveDocumentContext()$path
+    if (nchar(script_path) > 0) {
+      setwd(dirname(script_path))
+    }
+  }
+}
+cat("Working directory:", getwd(), "\n")
+
+# ---- 2. PBDB Download Function ----
+# Downloads occurrences in pages, with a pause between requests to be polite.
 fetch_pbdb_simple <- function(taxon_group, interval, outfile, limit = 5000, sleep = 0.5) {
   base_url <- "https://paleobiodb.org/data1.2/occs/list.csv"
   all_pages <- list()
   offset <- 0
   page <- 1
+  total_so_far <- 0  # running count of records downloaded
   
   cat("Starting download:", taxon_group, "-", interval, "\n")
   
@@ -69,7 +90,8 @@ fetch_pbdb_simple <- function(taxon_group, interval, outfile, limit = 5000, slee
     if (n_rows == 0) break
     
     all_pages[[length(all_pages) + 1]] <- df
-    cat(n_rows, "records (cumulative ~", length(all_pages) * limit - limit + n_rows, ")\n")
+    total_so_far <- total_so_far + n_rows
+    cat(n_rows, "records (cumulative:", total_so_far, ")\n")
     
     if (n_rows < limit) break
     offset <- offset + limit
@@ -84,17 +106,17 @@ fetch_pbdb_simple <- function(taxon_group, interval, outfile, limit = 5000, slee
   
   final_data <- bind_rows(all_pages)
   write_csv(final_data, outfile)
-  cat("Download finished. Total records saved:", nrow(final_data), "\n\n")
+  cat("Download completed. Total records saved:", nrow(final_data), "\n\n")
   return(final_data)
 }
 
 # ---- 3. Download PBDB Data ----
-# Define target taxa and periods
+# Define target groups and geological periods
 taxa <- c("Brachiopoda", "Bivalvia", "Echinodermata")
 periods <- c("Triassic", "Jurassic", "Cretaceous", "Paleogene", "Neogene", "Quaternary")
 
-# Create a task grid and loop through it
-# (Commented out to prevent accidental massive re-download. Uncomment to run.)
+# The download loop is commented out to prevent accidental large re-downloads.
+# Uncomment the lines below when you need to fetch fresh data.
 # for (t in taxa) {
 #   for (p in periods) {
 #     outfile_name <- paste0(p, "_", t, ".csv")
@@ -118,16 +140,19 @@ if (length(missing) > 0) {
   tasks <- tasks[file.exists(tasks$file), ]
 }
 
-# Read each file, add the period column, then bind all
+# Read each file, add the period column, then bind all rows together
 pbdb_combined <- lapply(seq_len(nrow(tasks)), function(i) {
   df <- read_csv(tasks$file[i], col_types = cols(.default = col_character()), progress = FALSE)
-  df$period <- tasks$period[i]    # label the batch
+  df$period <- tasks$period[i]
   return(df)
 }) %>% bind_rows()
 
+# Make sure the expected column 'phylum' exists
+stopifnot("phylum" %in% colnames(pbdb_combined))
+
 cat("Merged PBDB records:", nrow(pbdb_combined), "\n")
 
-# Basic summary statistics
+# Basic summary
 cat("\n--- PBDB Records by Phylum ---\n")
 pbdb_combined %>% count(phylum, sort = TRUE) %>% print()
 
@@ -137,25 +162,38 @@ pbdb_combined %>%
   pivot_wider(names_from = period, values_from = n, values_fill = list(n = 0)) %>%
   print()
 
-# Save the merged PBDB dataset
+# Save merged PBDB dataset
 write_csv(pbdb_combined, "PBDB_All_Mesozoic_Cenozoic.csv")
 saveRDS(pbdb_combined, "PBDB_All_Mesozoic_Cenozoic.rds")
 cat("Merged PBDB data saved.\n")
 
-
 # ---- 5. Integrate GBDB Data ----
 cat("\n--- Processing GBDB Data ---\n")
-gbdb_files <- c("Bivalvia 0-252 GBDB.csv", 
-                "Echinodermata 0-252 GBDB.csv", 
+# GBDB data are archived on Zenodo (DOI: 10.5281/zenodo.21765787).
+# The script will attempt to download them if they are not already present locally.
+gbdb_files <- c("Bivalvia 0-252 GBDB.csv",
+                "Echinodermata 0-252 GBDB.csv",
                 "Brachiopoda 0-252 GBDB.csv")
 
-# Check that all GBDB files exist
-if(all(file.exists(gbdb_files))) {
+# Download any missing GBDB files from Zenodo
+for (f in gbdb_files) {
+  if (!file.exists(f)) {
+    cat("Downloading", f, "from Zenodo...\n")
+    url <- paste0("https://zenodo.org/record/21765787/files/", URLencode(f))
+    tryCatch({
+      download.file(url, destfile = f, mode = "wb")
+    }, error = function(e) {
+      warning("Failed to download ", f, ": ", e$message)
+    })
+  }
+}
+
+if (all(file.exists(gbdb_files))) {
   gbdb_raw <- lapply(gbdb_files, function(f) {
     read_csv(f, col_types = cols(.default = col_character()), show_col_types = FALSE)
   }) %>% bind_rows()
   
-  target_phyla   <- c("Brachiopoda", "Echinodermata", "Mollusca")
+  target_phyla <- c("Brachiopoda", "Echinodermata", "Mollusca")
   
   gbdb_clean <- gbdb_raw %>%
     filter(
@@ -180,5 +218,5 @@ if(all(file.exists(gbdb_files))) {
   saveRDS(gbdb_clean, "GBDB_Mesozoic_Cenozoic_clean.rds")
   cat("Filtered GBDB data saved.\n")
 } else {
-  warning("GBDB files not found in working directory. Skipping GBDB integration.")
+  warning("GBDB files not found and could not be downloaded. Skipping GBDB integration.")
 }
