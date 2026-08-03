@@ -1,18 +1,60 @@
 # ==============================================================================
 # Script Name: 08_Combined_Main_Plots.R
 # Purpose: Combine Brachiopoda and Bivalvia diversity curves into side-by-side
-#          panels using identical plot logic and aesthetics as Script 04/05.
+#          panels using identical plot logic and aesthetics as Scripts 04 and 05.
 #          Echinodermata excluded due to sparse data.
-#          System labels placed above plot area, below facet strips.
-#          Paleogene–Neogene merged to avoid overlap.
+#          System labels placed above the plot area, below the facet strips.
 # ==============================================================================
 
+# Clear the workspace. Comment out this line if you want to keep existing objects.
 rm(list = ls())
-library(tidyverse)
+
+# ---- 1. Environment Setup & Packages ----
+required_packages <- c("dplyr", "ggplot2", "tidyr", "readr", "divDyn")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
+library(dplyr)
 library(ggplot2)
+library(tidyr)
+library(readr)
 library(divDyn)
 
-# ---- 1. Load plot data (Brachiopoda & Bivalvia only) ----
+# --- Working directory: choose one of the two options below ---
+# Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
+# Option B: Leave custom_dir as NULL or "" to automatically use the
+#           folder that contains this script (works in RStudio).
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
+
+if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
+  if (!dir.exists(custom_dir)) {
+    dir.create(custom_dir, recursive = TRUE)
+    cat("Folder created:", custom_dir, "\n")
+  }
+  setwd(custom_dir)
+} else {
+  if (requireNamespace("rstudioapi", quietly = TRUE)) {
+    script_path <- rstudioapi::getActiveDocumentContext()$path
+    if (nchar(script_path) > 0) {
+      setwd(dirname(script_path))
+    }
+  }
+}
+cat("Working directory:", getwd(), "\n")
+
+# ---- 2. Load plot data (Brachiopoda & Bivalvia only) ----
+# Check that required RDS files exist
+required_files <- c("Plot_Data/brach_bin_095.rds",
+                    "Plot_Data/bivalvia_bin_095.rds",
+                    "Plot_Data/brach_stage_095.rds",
+                    "Plot_Data/bivalvia_stage_095.rds")
+missing_files <- required_files[!file.exists(required_files)]
+if (length(missing_files) > 0) {
+  stop("Missing plot data files: ",
+       paste(missing_files, collapse = ", "),
+       ". Please run Scripts 04 and 05 first.")
+}
+
 brach_bin   <- readRDS("Plot_Data/brach_bin_095.rds")
 biv_bin     <- readRDS("Plot_Data/bivalvia_bin_095.rds")
 brach_stage <- readRDS("Plot_Data/brach_stage_095.rds")
@@ -23,7 +65,7 @@ bin_data <- bind_rows(brach_bin, biv_bin) %>%
 stage_data <- bind_rows(brach_stage, biv_stage) %>%
   mutate(Clade = factor(Clade, levels = c("Brachiopoda", "Bivalvia")))
 
-# ---- 2. Aesthetics (aligned with Script 04 & 05) ----
+# ---- 3. Global aesthetics (aligned with Scripts 04 & 05) ----
 data(stages)
 stages_ph <- stages %>%
   filter(stg >= 250 | system %in% c("Triassic", "Jurassic", "Cretaceous",
@@ -42,8 +84,8 @@ theme_common <- theme_minimal(base_size = 12) +
     panel.grid.major = element_line(color = "#f0f0f0", linewidth = 0.5),
     legend.position = "bottom",
     legend.box = "horizontal",
-    legend.margin = margin(t = -10, b = 0), 
-    legend.spacing.x = unit(0.2, "cm"),     
+    legend.margin = margin(t = -10, b = 0),
+    legend.spacing.x = unit(0.2, "cm"),
     plot.title = element_text(face = "bold", size = 13, hjust = 0),
     axis.title = element_text(face = "plain", size = 11),
     axis.text  = element_text(size = 10),
@@ -59,7 +101,7 @@ sys_rect <- stages_ph %>%
 system_labels <- sys_rect %>%
   mutate(mid = (xmin + xmax) / 2, label = system)
 
-# ---- 3. Missing segment helpers (Customized thresholds for clades) ----
+# ---- 4. Helper functions for missing segments ----
 make_segments_bin <- function(df) {
   df %>%
     filter(!is.na(value)) %>%
@@ -101,7 +143,7 @@ make_segments_stage <- function(df) {
 seg_bin   <- make_segments_bin(bin_data)
 seg_stage <- make_segments_stage(stage_data)
 
-# ---- 4. Combined 10-Myr bin plot ----
+# ---- 5. Combined 10-Myr bin plot ----
 p_bin <- ggplot() +
   geom_line(data = bin_data,
             aes(x = age, y = value, color = region, linetype = type),
@@ -117,19 +159,21 @@ p_bin <- ggplot() +
   scale_x_reverse(breaks = seq(0, 250, by = 50), name = "Age (Ma)") +
   scale_y_continuous(name = "Genus Richness",
                      expand = expansion(mult = c(0.05, 0.15))) +
-  scale_color_manual(values = region_colours, guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_linetype_manual(values = linetype_all, guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), guide = guide_legend(title = NULL, nrow = 1)) +
-  labs(title = NULL) + 
+  scale_color_manual(values = region_colours,
+                     guide = guide_legend(title = NULL, nrow = 1)) +
+  scale_linetype_manual(values = linetype_all,
+                        guide = guide_legend(title = NULL, nrow = 1)) +
+  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1),
+                     guide = guide_legend(title = NULL, nrow = 1)) +
+  labs(title = NULL) +
   theme_common
 
-# ---- 5. Combined stage-level plot (system labels above plot, below strips) ----
+# ---- 6. Combined stage-level plot ----
 p_stage <- ggplot() +
   geom_rect(data = sys_rect,
             aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, fill = system),
             alpha = 0.15, inherit.aes = FALSE) +
   scale_fill_manual(values = sys_colours, guide = "none") +
-  # System labels placed above plot area but below facet strips
   geom_text(data = system_labels,
             aes(x = mid, y = Inf, label = label),
             inherit.aes = FALSE,
@@ -149,20 +193,25 @@ p_stage <- ggplot() +
   scale_x_reverse(breaks = seq(0, 250, by = 50), name = "Age (Ma)") +
   scale_y_continuous(name = "Genus Richness",
                      expand = expansion(mult = c(0.05, 0.15))) +
-  scale_color_manual(values = region_colours, guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_linetype_manual(values = linetype_all, guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), guide = guide_legend(title = NULL, nrow = 1)) +
-  labs(title = NULL) + 
+  scale_color_manual(values = region_colours,
+                     guide = guide_legend(title = NULL, nrow = 1)) +
+  scale_linetype_manual(values = linetype_all,
+                        guide = guide_legend(title = NULL, nrow = 1)) +
+  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1),
+                     guide = guide_legend(title = NULL, nrow = 1)) +
+  labs(title = NULL) +
   theme_common +
   theme(
-    plot.margin = margin(t = 30, r = 10, b = 10, l = 10),  # enough space for labels
+    plot.margin = margin(t = 30, r = 10, b = 10, l = 10),
     axis.text.x.top = element_blank()
   )
 
-# ---- 6. Save outputs ----
+# ---- 7. Save outputs ----
 if (!dir.exists("Main_Figures")) dir.create("Main_Figures")
 
-ggsave("Main_Figures/Fig_Main_Bin_Combined.jpg", p_bin, width = 10, height = 5, dpi = 600)
-ggsave("Main_Figures/Fig_Main_Stage_Combined.jpg", p_stage, width = 10, height = 5, dpi = 600)
+ggsave("Main_Figures/Fig_Main_Bin_Combined.jpg",
+       p_bin, width = 10, height = 5, dpi = 600)
+ggsave("Main_Figures/Fig_Main_Stage_Combined.jpg",
+       p_stage, width = 10, height = 5, dpi = 600)
 
-message("Combined main figures saved (JPG, 600 dpi).")
+cat("Combined main figures saved (JPG, 600 dpi).\n")
