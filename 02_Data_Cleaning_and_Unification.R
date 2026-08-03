@@ -1,22 +1,49 @@
 # ==============================================================================
 # Script Name: 02_Data_Cleaning_and_Unification.R
-# Purpose: Clean taxonomy, resolve synonyms, unify PBDB & GBDB, 
+# Purpose: Clean taxonomy, resolve synonyms, unify PBDB & GBDB,
 #          assign stratigraphic stages, deduplicate, and filter environments.
 # ==============================================================================
 
+# Clear the workspace. Comment out this line if you want to keep existing objects.
 rm(list = ls())
 
 # ---- 0. Setup & Load Data ----
+# Install missing packages
+required_packages <- c("dplyr", "stringr", "stringdist", "readr", "divDyn")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
 library(dplyr)
 library(stringr)
 library(stringdist)
 library(readr)
 library(divDyn)
 
-# Set working directory
-setwd("D:/PBDB_Project")
+# --- Working directory: choose one of the two options below ---
+# Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
+# Option B: Leave custom_dir as NULL or "" to automatically use the
+#           folder that contains this script (works in RStudio).
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
 
-# Load raw merged data
+if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
+  # Use the user-specified directory
+  if (!dir.exists(custom_dir)) {
+    dir.create(custom_dir, recursive = TRUE)
+    cat("Folder created:", custom_dir, "\n")
+  }
+  setwd(custom_dir)
+} else {
+  # Automatically use the script's location (requires RStudio)
+  if (requireNamespace("rstudioapi", quietly = TRUE)) {
+    script_path <- rstudioapi::getActiveDocumentContext()$path
+    if (nchar(script_path) > 0) {
+      setwd(dirname(script_path))
+    }
+  }
+}
+cat("Working directory:", getwd(), "\n")
+
+# Load raw merged data (produced by Script 01)
 pbdb <- readRDS("PBDB_All_Mesozoic_Cenozoic.rds")
 gbdb <- readRDS("GBDB_Mesozoic_Cenozoic_clean.rds")
 
@@ -29,7 +56,7 @@ pbdb_brach <- pbdb %>%
     genus, family, order, class, phylum,
     early_interval, max_ma, min_ma, period,
     lng, lat, paleolng, paleolat,
-    cc = `cc...35`,
+    cc = `cc...35`,                     # PBDB column name may contain dots; adjust if needed
     environment, motility, life_habit, diet
   )
 
@@ -74,6 +101,42 @@ pbdb_brach <- pbdb_brach %>%
 
 gbdb_brach <- gbdb_brach %>%
   mutate(genus = std_taxon(genus), family = std_taxon(family))
+
+# ---- 3.5 Compute raw (pre-standardization) taxon counts ----
+raw_pbdb_counts <- pbdb_brach %>%
+  summarise(
+    source = "PBDB",
+    occurrences = n(),
+    genera = n_distinct(accepted_genus, na.rm = TRUE),
+    species = n_distinct(accepted_name[str_detect(accepted_name, " ")], na.rm = TRUE),
+    families = n_distinct(family, na.rm = TRUE)
+  )
+
+raw_gbdb_counts <- gbdb_brach %>%
+  summarise(
+    source = "GBDB",
+    occurrences = n(),
+    genera = n_distinct(genus, na.rm = TRUE),
+    species = n_distinct(identified_name[str_detect(identified_name, " ")], na.rm = TRUE),
+    families = n_distinct(family, na.rm = TRUE)
+  )
+
+raw_combined_summary <- bind_rows(raw_pbdb_counts, raw_gbdb_counts) %>%
+  bind_rows(
+    tibble(
+      source = "Total",
+      occurrences = sum(.$occurrences),
+      genera = n_distinct(c(pbdb_brach$accepted_genus, gbdb_brach$genus), na.rm = TRUE),
+      species = n_distinct(
+        c(pbdb_brach$accepted_name[str_detect(pbdb_brach$accepted_name, " ")],
+          gbdb_brach$identified_name[str_detect(gbdb_brach$identified_name, " ")]),
+        na.rm = TRUE),
+      families = n_distinct(c(pbdb_brach$family, gbdb_brach$family), na.rm = TRUE)
+    )
+  )
+
+cat("\n--- Raw brachiopod data (before synonym merging & deduplication) ---\n")
+print(raw_combined_summary)
 
 # ---- 4. Fuzzy Matching on Accepted Genera (PBDB only) ----
 detect_similar <- function(vec, threshold = 0.1) {
@@ -146,7 +209,6 @@ if (nrow(similar_accepted) > 0) {
 }
 
 # ---- 5.5 Detect Similar Families ----
-# This logic calculates family similarities to be exported in Section 9
 unique_families <- unique(na.omit(pbdb_brach$family))
 fam_similar <- if(length(unique_families) >= 2) detect_similar(unique_families, 0.1) else data.frame()
 
@@ -180,6 +242,17 @@ gbdb_unified <- gbdb_brach %>%
 analysis_data <- bind_rows(pbdb_unified, gbdb_unified) %>%
   mutate(across(c(max_ma, min_ma, lng, lat, paleolng, paleolat, coll_lower_depth, coll_upper_depth), as.numeric))
 
+# ---- 6.5 Count taxa after merging but before deduplication ----
+cat("\n--- After standardization & merging (before dedup) ---\n")
+merged_counts <- analysis_data %>%
+  summarise(
+    occurrences = n(),
+    genera = n_distinct(accepted_genus, na.rm = TRUE),
+    species = n_distinct(accepted_name[str_detect(accepted_name, " ")], na.rm = TRUE),
+    families = n_distinct(family, na.rm = TRUE)
+  )
+print(merged_counts)
+
 # ---- 7. Strict Stage Assignment (Using divDyn) ----
 analysis_data$mid_age <- (analysis_data$max_ma + analysis_data$min_ma) / 2
 
@@ -199,6 +272,17 @@ assign_stage_vec <- function(age, stages_df) {
 
 analysis_data$stage <- assign_stage_vec(analysis_data$mid_age, stages_ph)
 analysis_data <- filter(analysis_data, !is.na(stage))
+
+# ---- 7.1 Count after stage assignment but before dedup ----
+cat("\n--- After stage assignment (before dedup) ---\n")
+pre_dedup_counts <- analysis_data %>%
+  summarise(
+    occurrences = n(),
+    genera = n_distinct(accepted_genus, na.rm = TRUE),
+    species = n_distinct(accepted_name[str_detect(accepted_name, " ")], na.rm = TRUE),
+    families = n_distinct(family, na.rm = TRUE)
+  )
+print(pre_dedup_counts)
 
 # ---- 8. Cross-Database Duplicate Diagnostic & Removal ----
 cat("\n--- Cross-database duplicate diagnostic ---\n")
@@ -266,14 +350,18 @@ write_csv(analysis_data, "Brachiopoda_analysis_data.csv")
 if (nrow(pairs_labeled) > 0) write_csv(pairs_labeled, "similar_genus_pairs_all.csv")
 if (nrow(fam_similar) > 0) write_csv(fam_similar, "similar_family_pairs.csv")
 
-cat("\n--- Final Dataset Summary ---\n")
-cat("Total records:", nrow(analysis_data), "(PBDB:", sum(analysis_data$source == "PBDB"), "| GBDB:", sum(analysis_data$source == "GBDB"), ")\n")
-
-analysis_data %>%
+# ---- 9.1 Final Dataset Summary (after dedup + environment filtering) ----
+cat("\n--- Final Brachiopod Dataset (after dedup & marine filter) ---\n")
+final_counts <- analysis_data %>%
   summarise(
-    unique_genera = n_distinct(accepted_genus, na.rm = TRUE),
-    unique_families = n_distinct(family, na.rm = TRUE),
-    unique_species = n_distinct(accepted_name, na.rm = TRUE)
-  ) %>%
-  print()
-  
+    total_occurrences = n(),
+    unique_genera     = n_distinct(accepted_genus, na.rm = TRUE),
+    unique_species    = n_distinct(
+      accepted_name[str_detect(accepted_name, " ")], na.rm = TRUE),
+    unique_families   = n_distinct(family, na.rm = TRUE)
+  )
+print(final_counts)
+
+cat("\nTotal records:", nrow(analysis_data),
+    "(PBDB:", sum(analysis_data$source == "PBDB"),
+    "| GBDB:", sum(analysis_data$source == "GBDB"), ")\n")
