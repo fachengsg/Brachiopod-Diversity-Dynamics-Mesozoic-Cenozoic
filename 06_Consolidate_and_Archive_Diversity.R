@@ -1,7 +1,8 @@
 # ==============================================================================
 # Script Name: 06_Consolidate_and_Archive_Diversity.R
 # Purpose: Consolidate standardized diversity results, apply quality filtering
-#          (SC >= 0.6), and archive the workspace for Script 07 (Ecological Analysis).
+#          (SC >= 0.6, consistent with Scripts 04 and 05), and archive the
+#          workspace for Script 07 (Ecological Analysis).
 # ==============================================================================
 
 # Clear the workspace. Comment out this line if you want to keep existing objects.
@@ -21,7 +22,7 @@ library(openxlsx)
 # Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
 # Option B: Leave custom_dir as NULL or "" to automatically use the
 #           folder that contains this script (works in RStudio).
-custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to the preferred directory, or set to NULL
 
 if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
   if (!dir.exists(custom_dir)) {
@@ -60,11 +61,14 @@ if (length(all_results) == 0) {
 # ---- 3. Quality Filtering: Sample Coverage (SC) >= 0.6 ----
 SC_THRESHOLD <- 0.6
 
-# Helper function to extract and validate diversity estimates for one time level
+# Helper function to extract and validate diversity estimates for one time level.
+# Applies the rule established in Scripts 04 and 05: 
+# Retains the time bin/stage if ANY region (Global_incl, Global_excl, China) 
+# achieves a Sample Coverage (SC) >= 0.6.
 process_results <- function(level_name, sc_df_name, results_list_name) {
   map_dfr(names(all_results), function(clade) {
     diag_df <- all_results[[clade]][[sc_df_name]]       # SC data frame
-    res_list <- all_results[[clade]][[results_list_name]] # diversity lists per region
+    res_list <- all_results[[clade]][[results_list_name]] # Diversity lists per region
     
     if (is.null(diag_df) || is.null(res_list)) return(NULL)
     
@@ -81,8 +85,15 @@ process_results <- function(level_name, sc_df_name, results_list_name) {
         mutate(
           Clade = clade,
           Time_Format = level_name,
-          Status = ifelse(Global_incl_SC >= SC_THRESHOLD | China_SC >= SC_THRESHOLD,
-                          "Valid (Kept)", "Excluded (< 0.6 SC)")
+          # A stage/bin is marked as valid if ANY of the three regions has SC >= 0.6.
+          # NA values (missing data for a region) are treated as not meeting the threshold.
+          Status = ifelse(
+            (Global_incl_SC >= SC_THRESHOLD & !is.na(Global_incl_SC)) |
+              (Global_excl_SC >= SC_THRESHOLD & !is.na(Global_excl_SC)) |
+              (China_SC       >= SC_THRESHOLD & !is.na(China_SC)),
+            "Valid (Kept)",
+            "Excluded (< 0.6 SC)"
+          )
         )
     })
   })
@@ -95,7 +106,7 @@ final_raw_data <- bind_rows(
 )
 
 # ---- 4. Create Publication-Ready Workbook ----
-# Add a formatted value ± margin column
+# Add a formatted value +/- margin column
 publication_table <- final_raw_data %>%
   mutate(
     Margin = round((qD.UCL - qD.LCL) / 2, 1),
@@ -114,4 +125,4 @@ saveWorkbook(wb, "Publication_Diversity_Data.xlsx", overwrite = TRUE)
 # ---- 5. Archive for Script 07 (Ecological Analysis) ----
 saveRDS(final_raw_data, "Archive_Consolidated_Diversity_Results.rds")
 
-cat("\nScript 06 complete: Workbook exported and results archived for Script 07.\n")
+cat("\nProcessing complete. Workbook exported and results archived for Script 07.\n")
