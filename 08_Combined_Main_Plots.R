@@ -24,7 +24,7 @@ library(divDyn)
 # Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
 # Option B: Leave custom_dir as NULL or "" to automatically use the
 #           folder that contains this script (works in RStudio).
-custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to the local project folder, or set to NULL
 
 if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
   if (!dir.exists(custom_dir)) {
@@ -87,7 +87,7 @@ theme_common <- theme_minimal(base_size = 12) +
     panel.grid.major = element_line(color = "#f0f0f0", linewidth = 0.5),
     legend.position = "bottom",
     legend.box = "horizontal",
-    legend.key.width = unit(1.2, "cm"),   # make linetype differences visible
+    legend.key.width = unit(1.2, "cm"),   # Make linetype differences visible
     legend.margin = margin(t = -10, b = 0),
     legend.spacing.x = unit(0.2, "cm"),
     plot.title = element_text(face = "bold", size = 13, hjust = 0),
@@ -169,7 +169,7 @@ p_bin <- ggplot() +
   scale_linetype_manual(values = linetype_all, name = NULL) +
   scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), name = NULL) +
   guides(
-    color = guide_legend(nrow = 1)   # only manage colour legend; others merge automatically
+    color = guide_legend(nrow = 1)   # Only manage color legend; others merge automatically
   ) +
   labs(title = NULL) +
   theme_common
@@ -220,4 +220,4 @@ ggsave("Main_Figures/Fig_Main_Bin_Combined.jpg",
 ggsave("Main_Figures/Fig_Main_Stage_Combined.jpg",
        p_stage, width = 10, height = 5, dpi = 600)
 
-cat("Combined main figures saved (JPG, 600 dpi).\n")
+cat("Processing complete. Combined main figures saved (JPG, 600 dpi).\n")
