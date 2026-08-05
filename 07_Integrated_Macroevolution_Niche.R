@@ -1,9 +1,9 @@
 # ==============================================================================
 # Script Name: 07_Integrated_Macroevolution_Niche.R
-# Purpose: Reproducible visualization pipeline for brachiopod post‑Paleozoic
-#          evolution. Generates Figures 3–6 (taxonomic scale, ecological niches,
+# Purpose: Reproducible visualization pipeline for brachiopod post-Paleozoic
+#          evolution. Generates Figures 3-6 (taxonomic scale, ecological niches,
 #          paleolatitudinal distribution, and paleogeographic maps) plus
-#          supplementary family‑level summaries.
+#          supplementary family-level summaries.
 # ==============================================================================
 
 # Clear the workspace. Comment out this line if you want to keep existing objects.
@@ -29,7 +29,7 @@ library(cowplot)
 # Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
 # Option B: Leave custom_dir as NULL or "" to automatically use the
 #           folder that contains this script (works in RStudio).
-custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to the local project folder, or set to NULL
 
 if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
   if (!dir.exists(custom_dir)) {
@@ -52,7 +52,7 @@ theme_set(theme_classic(base_size = 14))
 
 # ---- 2. Load and prepare data ----
 if (!file.exists("Brachiopoda_analysis_data.rds")) {
-  stop("Input file 'Brachiopoda_analysis_data.rds' not found. Please run Scripts 01–02 first.")
+  stop("Input file 'Brachiopoda_analysis_data.rds' not found. Please run Scripts 01-02 first.")
 }
 
 occurrence_data <- readRDS("Brachiopoda_analysis_data.rds") %>%
@@ -187,6 +187,9 @@ p_lat <- ggplot(lat_data, aes(x = paleolat, y = Period)) +
     alpha = 0.7, scale = 1.2, rel_min_height = 0.01,
     quantile_lines = TRUE, quantiles = 2, fill = "#E41A1C"
   ) +
+  scale_x_continuous(
+    labels = function(x) ifelse(x < 0, paste0("\u2212", abs(x)), as.character(x))
+  ) +
   labs(
     title = "Brachiopoda Paleolatitudinal Distribution by Period",
     x = "Paleolatitude (°)", y = ""
@@ -194,7 +197,7 @@ p_lat <- ggplot(lat_data, aes(x = paleolat, y = Period)) +
 
 # ---- 7. Fig 6: Paleogeographic maps ----
 # Requires PALEOMAP paleocoastlines (v7, Scotese & Wright).
-# Download from https://zenodo.org/record/5469129 and extract the 'CS' folder
+# Download from https://zenodo.org/records/5469129 and extract the 'CS' folder
 # into './paleocoastlines/CS/' within the working directory.
 coast_dir <- file.path(getwd(), "paleocoastlines", "CS")
 
@@ -267,7 +270,7 @@ ggsave("Figures/Fig5_Latitude.jpg", p_lat,
 ggsave("Figures/Fig6_Paleogeographic_Maps.jpg", p_paleomaps,
        width = 18, height = 7, dpi = 600)
 
-cat("All figures saved in the 'Figures' folder.\n")
+cat("Processing complete. All figures successfully saved in the 'Figures' directory.\n")
 
 # ---- 9. Supplementary family-level summaries ----
 # Frequency of families by period
