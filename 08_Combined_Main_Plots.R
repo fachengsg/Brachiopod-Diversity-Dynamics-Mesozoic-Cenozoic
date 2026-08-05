@@ -69,7 +69,9 @@ stage_data <- bind_rows(brach_stage, biv_stage) %>%
 data(stages)
 stages_ph <- stages %>%
   filter(stg >= 250 | system %in% c("Triassic", "Jurassic", "Cretaceous",
-                                    "Paleogene", "Neogene", "Quaternary"))
+                                    "Paleogene", "Neogene", "Quaternary")) %>%
+  # Remove informal stages like "Early Jurassic", "Middle Triassic", etc.
+  filter(!grepl("Early|Middle|Late", stage, ignore.case = TRUE))
 
 sys_colours <- c("Triassic"   = "#812B92", "Jurassic"   = "#34B2C9",
                  "Cretaceous" = "#6E9E44", "Paleogene"  = "#FD9A52",
@@ -78,12 +80,14 @@ sys_colours <- c("Triassic"   = "#812B92", "Jurassic"   = "#34B2C9",
 region_colours <- c("Global (excl. China)" = "#2c7bb6", "China" = "#d7191c")
 linetype_all   <- c("Standardised" = "solid", "Raw" = "dashed", "Missing" = "dotted")
 
+# Base theme with longer legend key width to distinguish linetypes
 theme_common <- theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
     panel.grid.major = element_line(color = "#f0f0f0", linewidth = 0.5),
     legend.position = "bottom",
     legend.box = "horizontal",
+    legend.key.width = unit(1.2, "cm"),   # make linetype differences visible
     legend.margin = margin(t = -10, b = 0),
     legend.spacing.x = unit(0.2, "cm"),
     plot.title = element_text(face = "bold", size = 13, hjust = 0),
@@ -144,6 +148,8 @@ seg_bin   <- make_segments_bin(bin_data)
 seg_stage <- make_segments_stage(stage_data)
 
 # ---- 5. Combined 10-Myr bin plot ----
+# Linetype and shape legends are merged automatically; titles removed.
+# Missing segments mapped with both linetype and shape to appear in legend.
 p_bin <- ggplot() +
   geom_line(data = bin_data,
             aes(x = age, y = value, color = region, linetype = type),
@@ -153,18 +159,18 @@ p_bin <- ggplot() +
              size = 2.5, na.rm = TRUE) +
   geom_segment(data = seg_bin,
                aes(x = x, xend = xend, y = y, yend = yend,
-                   color = region, linetype = "Missing"),
+                   color = region, linetype = "Missing", shape = "Missing"),
                linewidth = 0.7) +
   facet_wrap(~ Clade, ncol = 2) +
   scale_x_reverse(breaks = seq(0, 250, by = 50), name = "Age (Ma)") +
   scale_y_continuous(name = "Genus Richness",
                      expand = expansion(mult = c(0.05, 0.15))) +
-  scale_color_manual(values = region_colours,
-                     guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_linetype_manual(values = linetype_all,
-                        guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1),
-                     guide = guide_legend(title = NULL, nrow = 1)) +
+  scale_color_manual(values = region_colours, name = NULL) +
+  scale_linetype_manual(values = linetype_all, name = NULL) +
+  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), name = NULL) +
+  guides(
+    color = guide_legend(nrow = 1)   # only manage colour legend; others merge automatically
+  ) +
   labs(title = NULL) +
   theme_common
 
@@ -187,18 +193,18 @@ p_stage <- ggplot() +
              size = 2.5, na.rm = TRUE) +
   geom_segment(data = seg_stage,
                aes(x = x, xend = xend, y = y, yend = yend,
-                   color = region, linetype = "Missing"),
+                   color = region, linetype = "Missing", shape = "Missing"),
                linewidth = 0.7) +
   facet_wrap(~ Clade, ncol = 2) +
   scale_x_reverse(breaks = seq(0, 250, by = 50), name = "Age (Ma)") +
   scale_y_continuous(name = "Genus Richness",
                      expand = expansion(mult = c(0.05, 0.15))) +
-  scale_color_manual(values = region_colours,
-                     guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_linetype_manual(values = linetype_all,
-                        guide = guide_legend(title = NULL, nrow = 1)) +
-  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1),
-                     guide = guide_legend(title = NULL, nrow = 1)) +
+  scale_color_manual(values = region_colours, name = NULL) +
+  scale_linetype_manual(values = linetype_all, name = NULL) +
+  scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), name = NULL) +
+  guides(
+    color = guide_legend(nrow = 1)
+  ) +
   labs(title = NULL) +
   theme_common +
   theme(
