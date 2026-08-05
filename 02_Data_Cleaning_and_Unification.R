@@ -1,6 +1,6 @@
 # ==============================================================================
 # Script Name: 02_Data_Cleaning_and_Unification.R
-# Purpose: Clean taxonomy, resolve synonyms, unify PBDB & GBDB,
+# Purpose: Clean taxonomy, resolve synonyms, unify PBDB and GBDB,
 #          assign stratigraphic stages, deduplicate, and filter environments.
 # ==============================================================================
 
@@ -47,7 +47,7 @@ cat("Working directory:", getwd(), "\n")
 pbdb <- readRDS("PBDB_All_Mesozoic_Cenozoic.rds")
 gbdb <- readRDS("GBDB_Mesozoic_Cenozoic_clean.rds")
 
-# ---- 1. Filter Brachiopoda & Select Essential Columns ----
+# ---- 1. Filter Brachiopoda and Select Essential Columns ----
 pbdb_brach <- pbdb %>%
   filter(phylum == "Brachiopoda") %>%
   select(
@@ -75,6 +75,7 @@ gbdb_brach <- gbdb %>%
   )
 
 # ---- 2. Remove Open Nomenclature ----
+# Remove uncertain taxonomic identifications (e.g., cf., aff., sp., ?)
 patterns <- c("cf\\.", "aff\\.", "\\?\\ ", " sp\\.", " indet\\.", " ex gr\\.",
               " sensu lato", " spp\\.", " informal", "\\?")
 
@@ -89,7 +90,7 @@ clean_names <- function(df, name_col) {
 pbdb_brach <- clean_names(pbdb_brach, "accepted_name")
 gbdb_brach <- clean_names(gbdb_brach, "identified_name")
 
-# ---- 3. Standardise Taxonomy & Capitalisation ----
+# ---- 3. Standardize Taxonomy and Capitalization ----
 pbdb_brach <- pbdb_brach %>% filter(!is.na(genus) | !is.na(family))
 gbdb_brach <- gbdb_brach %>% filter(!is.na(genus) | !is.na(family))
 
@@ -135,7 +136,7 @@ raw_combined_summary <- bind_rows(raw_pbdb_counts, raw_gbdb_counts) %>%
     )
   )
 
-cat("\n--- Raw brachiopod data (before synonym merging & deduplication) ---\n")
+cat("\n--- Raw brachiopod data (before synonym merging and deduplication) ---\n")
 print(raw_combined_summary)
 
 # ---- 4. Fuzzy Matching on Accepted Genera (PBDB only) ----
@@ -159,7 +160,7 @@ detect_similar <- function(vec, threshold = 0.1) {
 similar_accepted <- detect_similar(pbdb_brach$accepted_genus, threshold = 0.1)
 cat("\nSimilar accepted genera pairs found:", nrow(similar_accepted), "\n")
 
-# ---- 5. Classify Synonym Pairs & Align GBDB ----
+# ---- 5. Classify Synonym Pairs and Align GBDB Data ----
 synonym_map <- data.frame(target = character(), synonym = character())
 pairs_labeled <- data.frame()
 
@@ -243,7 +244,7 @@ analysis_data <- bind_rows(pbdb_unified, gbdb_unified) %>%
   mutate(across(c(max_ma, min_ma, lng, lat, paleolng, paleolat, coll_lower_depth, coll_upper_depth), as.numeric))
 
 # ---- 6.5 Count taxa after merging but before deduplication ----
-cat("\n--- After standardization & merging (before dedup) ---\n")
+cat("\n--- After standardization and merging (before deduplication) ---\n")
 merged_counts <- analysis_data %>%
   summarise(
     occurrences = n(),
@@ -273,8 +274,8 @@ assign_stage_vec <- function(age, stages_df) {
 analysis_data$stage <- assign_stage_vec(analysis_data$mid_age, stages_ph)
 analysis_data <- filter(analysis_data, !is.na(stage))
 
-# ---- 7.1 Count after stage assignment but before dedup ----
-cat("\n--- After stage assignment (before dedup) ---\n")
+# ---- 7.1 Count after stage assignment but before deduplication ----
+cat("\n--- After stage assignment (before deduplication) ---\n")
 pre_dedup_counts <- analysis_data %>%
   summarise(
     occurrences = n(),
@@ -284,7 +285,7 @@ pre_dedup_counts <- analysis_data %>%
   )
 print(pre_dedup_counts)
 
-# ---- 8. Cross-Database Duplicate Diagnostic & Removal ----
+# ---- 8. Identify and Remove Cross-Database Duplicates ----
 cat("\n--- Cross-database duplicate diagnostic ---\n")
 
 diag_data <- analysis_data %>%
@@ -350,8 +351,8 @@ write_csv(analysis_data, "Brachiopoda_analysis_data.csv")
 if (nrow(pairs_labeled) > 0) write_csv(pairs_labeled, "similar_genus_pairs_all.csv")
 if (nrow(fam_similar) > 0) write_csv(fam_similar, "similar_family_pairs.csv")
 
-# ---- 9.1 Final Dataset Summary (after dedup + environment filtering) ----
-cat("\n--- Final Brachiopod Dataset (after dedup & marine filter) ---\n")
+# ---- 9.1 Final Dataset Summary (after deduplication and environment filtering) ----
+cat("\n--- Final Brachiopod Dataset (after deduplication and marine filter) ---\n")
 final_counts <- analysis_data %>%
   summarise(
     total_occurrences = n(),
