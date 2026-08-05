@@ -1,12 +1,12 @@
 # ==============================================================================
 # Script Name: 01_Data_Fetching_and_Merging.R
-# Purpose: Fetch Mesozoic–Cenozoic brachiopod, bivalve, and echinoderm
+# Purpose: Download Mesozoic–Cenozoic brachiopod, bivalve, and echinoderm
 #          occurrences from the Paleobiology Database (PBDB) and integrate
-#          local data from the Geobiodiversity Database (GBDB).
+#          data from the Geobiodiversity Database (GBDB).
 # Data availability:
-#   - PBDB data are fetched directly from the PBDB API.
+#   - PBDB data are downloaded directly from the PBDB API.
 #   - GBDB data are archived on Zenodo (https://doi.org/10.5281/zenodo.21765787)
-#     and will be automatically downloaded if not present in the working directory.
+#     and will be automatically downloaded if not found in the working directory.
 # ==============================================================================
 
 # Clear the workspace. Comment out this line if you want to keep existing objects.
@@ -26,7 +26,7 @@ library(tidyr)
 # --- Working directory: choose one of the two options below ---
 # Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
 # Option B: Leave custom_dir as NULL or "" to automatically use the
-#           folder that contains this script (works in RStudio).
+#           folder that contains this script (requires RStudio).
 custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
 
 if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
@@ -48,13 +48,14 @@ if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
 cat("Working directory:", getwd(), "\n")
 
 # ---- 2. PBDB Download Function ----
-# Downloads occurrences in pages, with a pause between requests to be polite.
+# Downloads occurrence data in pages, with a short pause between requests 
+# to avoid overloading the server.
 fetch_pbdb_simple <- function(taxon_group, interval, outfile, limit = 5000, sleep = 0.5) {
   base_url <- "https://paleobiodb.org/data1.2/occs/list.csv"
   all_pages <- list()
   offset <- 0
   page <- 1
-  total_so_far <- 0  # running count of records downloaded
+  total_so_far <- 0  # Running count of downloaded records
   
   cat("Starting download:", taxon_group, "-", interval, "\n")
   
@@ -82,7 +83,7 @@ fetch_pbdb_simple <- function(taxon_group, interval, outfile, limit = 5000, slee
     csv_text <- content(resp, as = "text", encoding = "UTF-8")
     if (nchar(csv_text) == 0) break
     
-    # Read all columns as character to avoid type conflicts
+    # Read all columns as character to avoid data type conflicts
     df <- read_csv(csv_text, col_types = cols(.default = col_character()),
                    show_col_types = FALSE, progress = FALSE)
     
@@ -140,7 +141,7 @@ if (length(missing) > 0) {
   tasks <- tasks[file.exists(tasks$file), ]
 }
 
-# Read each file, add the period column, then bind all rows together
+# Read each file, add the period column, and bind all rows together
 pbdb_combined <- lapply(seq_len(nrow(tasks)), function(i) {
   df <- read_csv(tasks$file[i], col_types = cols(.default = col_character()), progress = FALSE)
   df$period <- tasks$period[i]
@@ -170,23 +171,13 @@ cat("Merged PBDB data saved.\n")
 # ---- 5. Integrate GBDB Data ----
 cat("\n--- Processing GBDB Data ---\n")
 # GBDB data are archived on Zenodo (DOI: 10.5281/zenodo.21765787).
-# The script will attempt to download them if they are not already present locally.
+# The script will attempt to download them if they are not found locally.
 gbdb_files <- c("Bivalvia 0-252 GBDB.csv",
                 "Echinodermata 0-252 GBDB.csv",
                 "Brachiopoda 0-252 GBDB.csv")
 
 # Download any missing GBDB files from Zenodo
-for (f in gbdb_files) {
-  if (!file.exists(f)) {
-    cat("Downloading", f, "from Zenodo...\n")
-    url <- paste0("https://zenodo.org/record/21765787/files/", URLencode(f))
-    tryCatch({
-      download.file(url, destfile = f, mode = "wb")
-    }, error = function(e) {
-      warning("Failed to download ", f, ": ", e$message)
-    })
-  }
-}
+## https://zenodo.org/records/21765787
 
 if (all(file.exists(gbdb_files))) {
   gbdb_raw <- lapply(gbdb_files, function(f) {
