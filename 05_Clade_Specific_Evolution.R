@@ -1,6 +1,6 @@
 # ==============================================================================
 # Script Name: 05_Clade_Specific_Evolution.R
-# Purpose: Separately calculate and plot coverage-based standardised diversity
+# Purpose: Separately calculate and plot coverage-based standardized diversity
 #          (q = 0) for Bivalvia and Echinodermata.
 # Features: Function-based exact duplicate of Script 04 logic. Exports results
 #           as RDS per clade for final Excel consolidation.
@@ -27,7 +27,7 @@ library(ggplot2)
 # Option A: Set a fixed directory (e.g., "D:/PBDB_Project" on Windows).
 # Option B: Leave custom_dir as NULL or "" to automatically use the
 #           folder that contains this script (works in RStudio).
-custom_dir <- "D:/PBDB_Project"   # <-- Change this to your preferred directory, or set to NULL
+custom_dir <- "D:/PBDB_Project"   # <-- Change this to the preferred directory, or set to NULL
 
 if (!is.null(custom_dir) && nchar(custom_dir) > 0) {
   if (!dir.exists(custom_dir)) {
@@ -54,12 +54,15 @@ bivalvia_df <- comp_data %>% filter(class == "Bivalvia")
 echino_df   <- comp_data %>% filter(phylum == "Echinodermata")
 
 # ---- 2. Helper Functions & Global Aesthetics ----
+
+# Common theme with longer legend key width to distinguish linetypes
 theme_common <- theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
     panel.grid.major = element_line(color = "#f0f0f0", linewidth = 0.5),
     legend.position = "bottom",
     legend.box = "horizontal",
+    legend.key.width = unit(1.2, "cm"),   # Make linetype differences visible
     plot.title = element_text(face = "bold", size = 13, hjust = 0),
     axis.title = element_text(face = "plain", size = 11),
     axis.text = element_text(size = 10),
@@ -69,7 +72,10 @@ theme_common <- theme_minimal(base_size = 12) +
 data(stages)
 stages_ph <- stages %>%
   filter(stg >= 250 | system %in% c("Triassic", "Jurassic", "Cretaceous",
-                                    "Paleogene", "Neogene", "Quaternary"))
+                                    "Paleogene", "Neogene", "Quaternary")) %>%
+  # Remove informal stages like "Early Jurassic", "Middle Triassic", etc.
+  filter(!grepl("Early|Middle|Late", stage, ignore.case = TRUE))
+
 stage_order_all <- stages_ph$stage
 
 sys_colours <- c("Triassic" = "#812B92", "Jurassic" = "#34B2C9", "Cretaceous" = "#6E9E44",
@@ -91,12 +97,14 @@ bin_labels <- paste0(seq(0, 250, by = 10), "-", seq(10, 260, by = 10))
 all_bins_sorted <- bin_labels[order(bin_breaks[-length(bin_breaks)], decreasing = TRUE)]
 bin_start_age_sorted <- as.numeric(sub("-.*", "", all_bins_sorted))
 
+# Helper to reshape iNEXT diversity estimates to wide format
 pivot_est <- function(est) {
   est %>% as.data.frame() %>%
     select(Assemblage, Order.q, qD) %>%
     pivot_wider(names_from = Order.q, values_from = qD, names_prefix = "q")
 }
 
+# Helper to create abundance matrix (genera * time bin)
 make_abundance_matrix <- function(data, bin_col) {
   data %>%
     filter(!is.na(genus) & !is.na(.data[[bin_col]])) %>%
@@ -107,6 +115,8 @@ make_abundance_matrix <- function(data, bin_col) {
     as.matrix()
 }
 
+# Generic plot builder with merged linetype/shape legend and suppressed titles.
+# Missing segments are drawn with fixed dotted line, shown in legend as "Missing".
 build_plot <- function(df, segments, region_cols, title_text, x_var, is_stage = FALSE) {
   active_regions <- unique(df$region)
   active_lines   <- unique(df$type)
@@ -134,13 +144,11 @@ build_plot <- function(df, segments, region_cols, title_text, x_var, is_stage = 
                size = 2.5, na.rm = TRUE) +
     scale_x_reverse(breaks = seq(0, 250, by = 50), name = "Age (Ma)") +
     scale_y_continuous(name = "Genus Richness") +
-    scale_color_manual(values = plot_colors) +
-    scale_linetype_manual(values = plot_lines, name = "Data Profile") +
-    scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), name = "Data Profile") +
+    scale_color_manual(values = plot_colors, name = NULL) +
+    scale_linetype_manual(values = plot_lines, name = NULL) +
+    scale_shape_manual(values = c("Standardised" = 16, "Raw" = 17, "Missing" = 1), name = NULL) +
     guides(
-      color = guide_legend(title = NULL, nrow = 1),
-      linetype = guide_legend(title = NULL, nrow = 1),
-      shape = guide_legend(title = NULL, nrow = 1)
+      color = guide_legend(nrow = 1)   # Only manage color legend; linetype & shape merge automatically
     ) +
     theme_common +
     theme(
@@ -155,7 +163,8 @@ build_plot <- function(df, segments, region_cols, title_text, x_var, is_stage = 
   
   if (nrow(segments) > 0) {
     p <- p + geom_segment(data = segments,
-                          aes(x = x, xend = xend, y = y, yend = yend, color = region, linetype = "Missing"),
+                          aes(x = x, xend = xend, y = y, yend = yend,
+                              color = region, linetype = "Missing", shape = "Missing"),
                           linewidth = 0.7)
   }
   return(p)
@@ -204,7 +213,6 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
     div_095 <- estimateD(mat, q = c(0, 1, 2), datatype = "abundance",
                          base = "coverage", level = 0.95)
     
-    # Compute raw richness and trim intervals with low sample coverage (SC < 0.6)
     raw <- data.frame(stage = colnames(mat), raw_richness = colSums(mat > 0))
     datainfo <- DataInfo(mat, datatype = "abundance")
     raw <- raw %>%
@@ -216,11 +224,16 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
                                       raw = raw, mat = mat)
   }
   
-  common_stages_all <- Reduce(intersect, lapply(stage_results, function(x) colnames(x$mat)))
+  # Use union of Global_incl and Global_excl stages, restricted to valid stages
+  common_stages_all <- union(colnames(stage_results$Global_incl$mat),
+                             colnames(stage_results$Global_excl$mat))
+  common_stages_all <- common_stages_all[common_stages_all %in% stage_order_all]
+  
   sc_list <- lapply(names(dataset_list), function(set_name) {
-    DataInfo(stage_results[[set_name]]$mat, datatype = "abundance")$SC[
-      match(common_stages_all,
-            DataInfo(stage_results[[set_name]]$mat, datatype = "abundance")$Assemblage)]
+    avail <- common_stages_all
+    sc_vec <- DataInfo(stage_results[[set_name]]$mat, datatype = "abundance")$SC
+    names(sc_vec) <- DataInfo(stage_results[[set_name]]$mat, datatype = "abundance")$Assemblage
+    sc_vec[avail]
   })
   names(sc_list) <- names(dataset_list)
   
@@ -232,20 +245,32 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
     left_join(DataInfo(stage_results$China$mat, datatype = "abundance") %>%
                 select(Assemblage, China_SC = SC), by = "Assemblage")
   
-  keep_stage <- sc_list$China >= 0.6 | sc_list$Global_excl >= 0.6
+  # Keep stages where any region has SC >= 0.6
+  keep_stage <- (sc_list$China >= 0.6) | (sc_list$Global_excl >= 0.6) | (sc_list$Global_incl >= 0.6)
+  keep_stage[is.na(keep_stage)] <- FALSE
   valid_stages_all <- common_stages_all[keep_stage]
   
-  sc_valid_vec <- unlist(sapply(names(dataset_list), function(set_name) {
-    DataInfo(stage_results[[set_name]]$mat[, valid_stages_all, drop = FALSE],
-             datatype = "abundance")$SC
-  }))
-  min_cov_stage <- min(sc_valid_vec[sc_valid_vec >= 0.6], na.rm = TRUE)
+  # Helper to safely get SC values for valid stages
+  get_sc_for_stages <- function(mat, stages) {
+    exist <- intersect(stages, colnames(mat))
+    if (length(exist) == 0) return(NULL)
+    DataInfo(mat[, exist, drop = FALSE], datatype = "abundance")$SC
+  }
+  
+  sc_values_list <- lapply(stage_results, function(x) get_sc_for_stages(x$mat, valid_stages_all))
+  sc_values <- unlist(sc_values_list)
+  min_cov_stage <- min(sc_values[sc_values >= 0.6], na.rm = TRUE)
   
   for (set_name in names(dataset_list)) {
-    stage_results[[set_name]]$div_min <- estimateD(
-      stage_results[[set_name]]$mat[, valid_stages_all, drop = FALSE],
-      q = c(0, 1, 2), datatype = "abundance", base = "coverage", level = min_cov_stage
-    )
+    stages <- intersect(valid_stages_all, colnames(stage_results[[set_name]]$mat))
+    if (length(stages) > 0) {
+      stage_results[[set_name]]$div_min <- estimateD(
+        stage_results[[set_name]]$mat[, stages, drop = FALSE],
+        q = c(0, 1, 2), datatype = "abundance", base = "coverage", level = min_cov_stage
+      )
+    } else {
+      stage_results[[set_name]]$div_min <- NULL
+    }
   }
   
   stage_order <- stage_order_all[stage_order_all %in% common_stages_all]
@@ -286,7 +311,7 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
       group_by(region, type) %>%
       mutate(next_idx = lead(idx), next_mid = lead(mid_age), next_val = lead(value)) %>%
       filter(!is.na(next_idx), next_idx - idx > 1) %>%
-      filter(abs(next_mid - mid_age) <= 85) %>%   # allow larger gaps for sparse data
+      filter(abs(next_mid - mid_age) <= 85) %>%   # Allow larger gaps for sparse data
       ungroup() %>%
       select(region, type, x = mid_age, xend = next_mid, y = value, yend = next_val)
   }
@@ -304,10 +329,19 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
       filter(!is.na(bin))
   }
   
-  bin_matrices <- lapply(dataset_list, function(x) make_abundance_matrix(x$data, "bin"))
-  common_bins <- Reduce(intersect, lapply(bin_matrices, colnames))
+  bin_matrices_full <- lapply(dataset_list, function(x) make_abundance_matrix(x$data, "bin"))
+  
+  # Use union of Global_incl and Global_excl bins
+  common_bins <- union(colnames(bin_matrices_full$Global_incl),
+                       colnames(bin_matrices_full$Global_excl))
+  common_bins <- common_bins[common_bins %in% all_bins_sorted]
   common_bins <- common_bins[order(as.numeric(sub("-.*", "", common_bins)))]
-  bin_matrices <- lapply(bin_matrices, function(m) m[, common_bins, drop = FALSE])
+  
+  # Safe subset: keep only bins that actually exist in each matrix
+  bin_matrices <- lapply(bin_matrices_full, function(m) {
+    keep <- intersect(common_bins, colnames(m))
+    m[, keep, drop = FALSE]
+  })
   
   bin_results <- list()
   for (set_name in names(dataset_list)) {
@@ -321,7 +355,11 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
     )
   }
   
-  sc_bin_list <- lapply(bin_matrices, function(m) DataInfo(m, datatype = "abundance")$SC)
+  sc_bin_list <- lapply(bin_matrices, function(m) {
+    sc <- DataInfo(m, datatype = "abundance")$SC
+    names(sc) <- colnames(m)
+    sc[common_bins]
+  })
   names(sc_bin_list) <- names(dataset_list)
   
   bin_sc_df <- data.frame(Assemblage = common_bins) %>%
@@ -332,22 +370,32 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
     left_join(DataInfo(bin_matrices$China, datatype = "abundance") %>%
                 select(Assemblage, China_SC = SC), by = "Assemblage")
   
-  keep_bin <- sc_bin_list$China >= 0.6 | sc_bin_list$Global_excl >= 0.6
+  keep_bin <- (sc_bin_list$China >= 0.6) | (sc_bin_list$Global_excl >= 0.6) | (sc_bin_list$Global_incl >= 0.6)
+  keep_bin[is.na(keep_bin)] <- FALSE
   valid_bins <- common_bins[keep_bin]
   
-  sc_bin_valid_vec <- unlist(sapply(names(dataset_list), function(set_name) {
-    DataInfo(bin_matrices[[set_name]][, valid_bins, drop = FALSE], datatype = "abundance")$SC
-  }))
-  min_cov_bin <- min(sc_bin_valid_vec[sc_bin_valid_vec >= 0.6], na.rm = TRUE)
-  
-  for (set_name in names(dataset_list)) {
-    bin_results[[set_name]]$div_min <- estimateD(
-      bin_matrices[[set_name]][, valid_bins, drop = FALSE],
-      q = c(0, 1, 2), datatype = "abundance", base = "coverage", level = min_cov_bin
-    )
+  get_sc_for_bins <- function(mat, bins) {
+    exist <- intersect(bins, colnames(mat))
+    if (length(exist) == 0) return(NULL)
+    DataInfo(mat[, exist, drop = FALSE], datatype = "abundance")$SC
   }
   
-  # Raw bin data with low coverage trimming
+  sc_bin_values_list <- lapply(bin_results, function(x) get_sc_for_bins(x$mat, valid_bins))
+  sc_bin_values <- unlist(sc_bin_values_list)
+  min_cov_bin <- min(sc_bin_values[sc_bin_values >= 0.6], na.rm = TRUE)
+  
+  for (set_name in names(dataset_list)) {
+    bins <- intersect(valid_bins, colnames(bin_results[[set_name]]$mat))
+    if (length(bins) > 0) {
+      bin_results[[set_name]]$div_min <- estimateD(
+        bin_results[[set_name]]$mat[, bins, drop = FALSE],
+        q = c(0, 1, 2), datatype = "abundance", base = "coverage", level = min_cov_bin
+      )
+    } else {
+      bin_results[[set_name]]$div_min <- NULL
+    }
+  }
+  
   raw_bin_list <- lapply(names(dataset_list), function(set_name) {
     x <- dataset_list[[set_name]]
     raw_df <- x$data %>%
@@ -404,7 +452,7 @@ analyze_clade_evolution <- function(clade_name, clade_data) {
       arrange(age) %>%
       mutate(next_age = lead(age), next_val = lead(value)) %>%
       filter(!is.na(next_age), abs(next_age - age) > 10) %>%
-      filter(abs(next_age - age) <= 85) %>%   # allow larger gaps for sparse data
+      filter(abs(next_age - age) <= 85) %>%   # Allow larger gaps for sparse data
       ungroup() %>%
       select(region, type, x = age, xend = next_age, y = value, yend = next_val)
   }
